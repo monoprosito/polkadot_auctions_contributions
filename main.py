@@ -1,138 +1,71 @@
-import json
-import typing
+#!venv/bin/python3
 from substrateinterface import SubstrateInterface
+import json
 
+PDEX_FOUND_ADDRESS = "13UVJyLnbVp77Z2t6qjFmcyzTXYQJjyb6Hww7ZHPumd81iht"
 AUCTION_NAME = 'Polkadex'
-MAX_BLOCKS_TO_QUERY = 5
-AUCTION_GENESIS_BLOCK_ID = 9743944
+PARA_ID = 2040
 
-POLKADEX_FOUND_ADDRESS = '13UVJyLnbVp77Z2t6qjFmcyzTXYQJjyb6Hww7ZHPumd81iht'
-PARALLEL_ADDRESS = ''
-BIFROST_ADDRESS = ''
-
-
-def is_a_crowdloan_extrinsic(extrinsic: dict) -> bool:
-    return extrinsic.value.get('call').get('call_module') == 'Crowdloan'
-
-def get_crowdloan_extrinsic_v2(extrinsic: dict) -> typing.Optional[dict]:
-    main_module = extrinsic.value.get('call')
-
-    if main_module.get('call_module') == 'Utility':
-        calls = main_module.get('call_args')[0].get('value')
-        for call in calls:
-            if call.get('call_module') == 'Proxy':
-                proxy_calls = call.get('call_args')
-                for proxy_call in proxy_calls:
-                    if (proxy_call.get('type') == 'Call' and
-                        proxy_call.get('value').get('call_module') == 'Crowdloan'
-                        ):
-                        return proxy_call.get('value')
-
-    return None
-
-
-def get_arg_from_extrinsic(extrinsic_args: list, arg_type: str) -> dict:
-    if isinstance(extrinsic_args, list):
-        for ext_arg in extrinsic_args:
-            if ext_arg.get('type') == arg_type:
-                return ext_arg
-
-
-if __name__ == '__main__':
+if __name__ == "__main__":
     substrate = SubstrateInterface(
-        url="wss://rpc.polkadot.io"
+        url="wss://rpc.polkadot.io",
+        ss58_format=0,
+        type_registry_preset='polkadot'
     )
 
-    block_id = AUCTION_GENESIS_BLOCK_ID
-
-    # Retrieve genesis block
-    block = substrate.get_block(block_number=AUCTION_GENESIS_BLOCK_ID)
+    block_init = 9743944
+    block_end = 10881400
 
     data = {
-        'auction': AUCTION_NAME,
-        'addresses': {}
+        'wallets': {},
+        'total_transactions': 0,
+        'total_contributed': 0
     }
 
-    # Explore block extrinsics
-    processed_blocks_num = 0
-    while block:
-        for ext_idx in range(len(block['extrinsics'])):
-            extrinsic = block['extrinsics'][ext_idx]
-            crowdloan_extrinsic_identified = False
+    symbol = substrate.token_symbol
 
-            if is_a_crowdloan_extrinsic(extrinsic):
-                crowdloan_extrinsic_identified = True
-                extrinsic_data = extrinsic.value
-                extrinsic_args = extrinsic_data.get('call').get('call_args')
+    while block_init <= substrate.get_block_header()['header'].get('number'):
 
-            if not crowdloan_extrinsic_identified:
-                extrinsic_data = get_crowdloan_extrinsic_v2(extrinsic)
-                if not isinstance(extrinsic_data, dict):
-                    continue
+        block_hash = substrate.get_block_hash(block_id=block_init)
+        data_events = substrate.get_events(block_hash)
 
-                crowdloan_extrinsic_identified = True
-                extrinsic_args = extrinsic_data.get('call_args')
+        for event in data_events:
+            if event.value.get('module_id') == 'Crowdloan':
+                if event.value.get('event').get('attributes')[1] == PARA_ID:
+                    sender = event.value.get('event').get('attributes')[0]
+                    para_id = event.value.get('event').get('attributes')[1]
+                    amount = event.value.get('event').get('attributes')[2] / 10 ** substrate.token_decimals
+                    extrinsic_id = '{}-{}'.format(str(block_init), event.value.get('extrinsic_idx'))
 
-            if not crowdloan_extrinsic_identified:
-                block_id += 1
-                block = substrate.get_block(block_number=block_id)
-                continue
+                    if sender not in data['wallets'].keys():
+                        data['wallets'][sender] = {
+                            'para_id': para_id,
+                            'amount': amount,
+                            'extrinsic_id': [extrinsic_id],
+                            'total_contributions': 1,
+                            'block_hash': [block_hash]
+                        }
+                        data['total_transactions'] += 1
+                        data['total_contributed'] += amount
 
-            extrinsic_account_sender_address = extrinsic.value.get('address')
-
-            ext_paraid_arg = get_arg_from_extrinsic(
-                extrinsic_args, 'ParaId')
-            if (isinstance(ext_paraid_arg, dict) and
-                ext_paraid_arg.get('value') == 2040):
-                if substrate.retrieve_extrinsic_by_identifier(
-                        f'{block_id}-{ext_idx}').is_success:
-                    if extrinsic_account_sender_address not in data['addresses'].keys():
-                        data['addresses'][extrinsic_account_sender_address] = {}
-
-                    ext_balance_arg = get_arg_from_extrinsic(
-                        extrinsic_args, 'BalanceOf')
-                    extrinsic_balance = (
-                        ext_balance_arg.get('value') / 10 **
-                        substrate.token_decimals)
-
-                    if 'total_dots' in data['addresses'][extrinsic_account_sender_address].keys():
-                        data['addresses'][extrinsic_account_sender_address][f'total_{substrate.token_symbol.lower()}'] += extrinsic_balance
+                        print(f"{data['total_transactions']}- New contribution found at block: ", end='')
+                        print(f"(#{block_init}) data: ({sender}, {amount} {symbol},", end='')
+                        print(f"extrinsicID: {extrinsic_id}) DOTs raised: {data['total_contributed']}")
                     else:
-                        data['addresses'][extrinsic_account_sender_address][f'total_{substrate.token_symbol.lower()}'] = extrinsic_balance
+                        data['wallets'][sender]['amount'] += amount
+                        data['wallets'][sender]['extrinsic_id'].append(extrinsic_id)
+                        data['wallets'][sender]['total_contributions'] += 1
+                        data['total_transactions'] += 1
+                        data['wallets'][sender]['block_hash'].append(block_hash)
+                        data['total_contributed'] += amount
 
-                    if 'total_contributions' in data['addresses'][extrinsic_account_sender_address].keys():
-                        data['addresses'][extrinsic_account_sender_address]['total_contributions'] += 1
-                    else:
-                        data['addresses'][extrinsic_account_sender_address]['total_contributions'] = 1
+                        print(f"{data['total_transactions']}- Updating contribution data at:  ", end='')
+                        print(f"(#{block_init}) wallet: {sender} with new amount: {amount} {symbol},", end='')
+                        print(f"extrinsicID: {extrinsic_id}) DOTs raised: {data['total_contributed']}")
 
-                    if 'blocks' in data['addresses'][extrinsic_account_sender_address].keys():
-                        data['addresses'][extrinsic_account_sender_address]['blocks'].append({
-                            'block_hash': block.get('header').get('hash'),
-                            'block_number': block.get('header').get('number'),
-                            'extrinsics': [
-                                extrinsic.value.get('extrinsic_hash')
-                            ]
-                        })
-                    else:
-                        data['addresses'][extrinsic_account_sender_address]['blocks'] = []
-                        data['addresses'][extrinsic_account_sender_address]['blocks'].append({
-                            'block_hash': block.get('header').get('hash'),
-                            'block_number': block.get('header').get('number'),
-                            'extrinsics': [
-                                extrinsic.value.get('extrinsic_hash')
-                            ]
-                        })
-
-                    processed_blocks_num += 1
-                    print(f'{processed_blocks_num}. {AUCTION_NAME} block (#{block_id}) found.')
-                    print(f'Account Sender Address: {extrinsic_account_sender_address}')
-                    print(f'Balance: {round(extrinsic_balance, 3)} {substrate.token_symbol}', end='\n\n')
-
-        if processed_blocks_num == MAX_BLOCKS_TO_QUERY:
+        if block_init == block_end:
             break
+        block_init += 1
 
-        block_id += 1
-        block = substrate.get_block(block_number=block_id)
-
-    with open(f'{AUCTION_NAME}_blocks.json', 'w+') as f:
+    with open(f'{AUCTION_NAME}_crowdloan.json', 'w+') as f:
         json.dump(data, f)
