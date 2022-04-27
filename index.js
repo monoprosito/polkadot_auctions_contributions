@@ -13,8 +13,6 @@ async function main () {
     const genesisBlock = polkadexLastBlock;
     const lastBlock = polkadexLastBlock;
 
-    const encodedStorageKey = '0x3d9cad2baf702e20b136f4c8900cd802b6f9671a19ef28ecb1e331fea30290980f474ee85a3cd622f8070000';
-
     let data = {
         'auction': 'Polkadex',
         'wallets': {},
