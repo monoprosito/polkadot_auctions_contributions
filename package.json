@@ -10,6 +10,6 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
-    "@polkadot/api": "^8.2.1"
+    "axios": "^0.27.2"
   }
 }
