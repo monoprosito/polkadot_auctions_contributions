@@ -72,7 +72,6 @@ function scrapeCrowdloanData () {
                     to_block: lastBlockNumber + 10
                 })
                 .then((response) => {
-                    console.log('PRUEBA 2');
                     totalPages = response.data.data.count / rowsPerPage;
                     const transfers = response.data.data.transfers;
 
