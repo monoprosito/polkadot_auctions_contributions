@@ -2,6 +2,7 @@
 import axios from 'axios';
 import fs from 'fs';
 import path from 'path';
+import process from 'process';
 import {fileURLToPath} from 'url';
 
 
@@ -17,19 +18,17 @@ function scrapeCrowdloanData () {
     const CROWDLOAN_DATA_PATH = path.join(__dirname, 'crowdloan_data.json');
     const LAST_BLOCK_NUMBER_PATH = path.join(__dirname, 'last_block_number.json');
     const TRANSFERS_ENDPOINT = '/api/scan/transfers';
-    // const API_ENDPOINT = `${SUBSCAN_API_ENDPOINT}${TRANSFERS_ENDPOINT}`;
     const POLKADEX_PARA_ID = 2040;
     const POLKADEX_GENESIS_BLOCK_NUMBER = 9743944;
     const POLKADEX_LAST_BLOCK_NUMBER = 10881400;
-    // const rowsPerPage = 100;
-    const rowsPerPage = 1;
+    const rowsPerPage = 25;
 
     let data = {};
     let currentPage = 0;
     let totalPages = 0;
+    let lastCrowdloanBlockNumber = 0;
     let lastBlockNumber = POLKADEX_GENESIS_BLOCK_NUMBER;
 
-    // Load JSON data if exists
     if (checkExistingJSON(CROWDLOAN_DATA_PATH)) {
         data = loadJSON(CROWDLOAN_DATA_PATH);
     } else {
@@ -51,70 +50,87 @@ function scrapeCrowdloanData () {
 
     if (checkExistingJSON(LAST_BLOCK_NUMBER_PATH)) {
         lastBlockNumber = loadJSON(LAST_BLOCK_NUMBER_PATH).lastBlockNumber;
-        console.log(`Loaded: ${lastBlockNumber}`);
+        console.log(`Last Block Number loaded. Starting from block #${lastBlockNumber}`);
+        lastBlockNumber += 1;
     }
 
     subscanApi.post(TRANSFERS_ENDPOINT, {
-            address: POLKADEX_FUND_ACCOUNT,
-            row: rowsPerPage,
-            page: 0,
-            from_block: lastBlockNumber,
-            to_block: POLKADEX_LAST_BLOCK_NUMBER
-        })
-        .then((response) => {
-            totalPages = response.data.data.count / rowsPerPage;
-            const transfers = response.data.data.transfers;
+        address: POLKADEX_FUND_ACCOUNT,
+        row: 1,
+        page: 0
+    })
+    .then((res) => {
+        lastCrowdloanBlockNumber = res.data.data.transfers[0].block_num;
+        console.log(`Getting info until Crowdloan Block #${lastCrowdloanBlockNumber}`);
 
-            for (const transfer of transfers) {
-                const sender = transfer.from;
-                const amount = parseFloat(transfer.amount);
+        while (lastBlockNumber <= lastCrowdloanBlockNumber) {
+            subscanApi.post(TRANSFERS_ENDPOINT, {
+                    address: POLKADEX_FUND_ACCOUNT,
+                    row: rowsPerPage,
+                    page: 0,
+                    from_block: lastBlockNumber,
+                    to_block: lastBlockNumber + 10
+                })
+                .then((response) => {
+                    console.log('PRUEBA 2');
+                    totalPages = response.data.data.count / rowsPerPage;
+                    const transfers = response.data.data.transfers;
 
-                data['total_transactions'] += 1;
-                data['total_contributed'] += amount;
+                    for (const transfer of transfers) {
+                        const sender = transfer.from;
+                        const amount = parseFloat(transfer.amount);
 
-                if (Object.keys(data.wallets).includes(sender)) {
-                    data.wallets[sender]['amount'] += amount;
-                    data.wallets[sender]['total_contributions'] += 1;
-                    data.wallets[sender]['blocks'].push({
-                        'block_hash': transfer.hash,
-                        'block_number': transfer.block_num
-                    })
+                        data['total_transactions'] += 1;
+                        data['total_contributed'] += amount;
 
-                    console.log(`${data['total_transactions']}. Actualizando contribución de (${sender}) en el bloque #${transfer.block_num}:`);
-                    console.log(`Sender Total Amount: ${data.wallets[sender]['amount']} DOTs`);
-                    console.log(`Auction Total Amount: ${data['total_contributed']} DOTs`);
-                } else {
-                    data.wallets[sender] = {
-                        'para_id': POLKADEX_PARA_ID,
-                        'amount': amount,
-                        'total_contributions': 1,
-                        'blocks': [{
-                            'block_hash': transfer.hash,
-                            'block_number': transfer.block_num
-                        }]
+                        if (Object.keys(data.wallets).includes(sender)) {
+                            data.wallets[sender]['amount'] += amount;
+                            data.wallets[sender]['total_contributions'] += 1;
+                            data.wallets[sender]['blocks'].push({
+                                'block_hash': transfer.hash,
+                                'block_number': transfer.block_num
+                            })
+
+                            console.log(`${data['total_transactions']}. Updating contribution of (${sender}) in the block #${transfer.block_num}:`);
+                            console.log(`Sender Total Amount: ${data.wallets[sender]['amount']} DOTs`);
+                            console.log(`Auction Total Amount: ${data['total_contributed']} DOTs`);
+                        } else {
+                            data.wallets[sender] = {
+                                'para_id': POLKADEX_PARA_ID,
+                                'amount': amount,
+                                'total_contributions': 1,
+                                'blocks': [{
+                                    'block_hash': transfer.hash,
+                                    'block_number': transfer.block_num
+                                }]
+                            }
+                            console.log(`${data['total_transactions']}. New contribution in the block #${transfer.block_num}:`);
+                            console.log(`Sender (${sender}) - Amount (${amount} DOTs)`);
+                            console.log(`Auction Total Amount: ${data['total_contributed']} DOTs`);
+                        }
+
+                        lastBlockNumber = transfer.block_num;
+                        writeJSON(CROWDLOAN_DATA_PATH, data);
                     }
-                    console.log(`${data['total_transactions']}. Nueva contribución en el bloque #${transfer.block_num}:`);
-                    console.log(`Sender (${sender}) - Amount (${amount} DOTs)`);
-                    console.log(`Auction Total Amount: ${data['total_contributed']} DOTs`);
-                }
+                })
+                .catch((err) => {
+                    console.log('Identified error');
+                    console.log(err);
+                    console.log(`Last Block Number: ${lastBlockNumber}`);
+                })
+                .finally(() => {
+                    writeJSON(LAST_BLOCK_NUMBER_PATH, {
+                        lastBlockNumber: lastBlockNumber
+                    });
+                });
 
-                lastBlockNumber = transfer.block_num;
-                writeJSON(CROWDLOAN_DATA_PATH, data);
-
-                // verificar que el bloquie desde el cua lse empieza ya existe
-                // para no almacenarlo
-            }
-        })
-        .catch((err) => {
-            console.log('Identified error');
-            console.log(err);
-            console.log(`Current page: ${currentPage}`);
-        })
-        .finally(() => {
-            writeJSON(LAST_BLOCK_NUMBER_PATH, {
-                lastBlockNumber: lastBlockNumber
-            });
-        });
+                setInterval(() => {}, 1000);
+        }
+    })
+    .catch((err) => {
+        console.log('ERROR: Last Crowdloan Block Number not fetched.')
+        process.exit(1);
+    });
 }
 
 
