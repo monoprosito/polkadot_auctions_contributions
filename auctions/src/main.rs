@@ -26,7 +26,6 @@ struct WalletInfo {
 }
 
 #[derive(Serialize, Deserialize, Debug)]
-
 struct AuctionInfo {
     wallets: HashMap<String, WalletInfo>,
     total_transactions: u32,
