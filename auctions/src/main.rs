@@ -133,6 +133,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
         }
+        // this con variable is only for test propouse
         if con == 100 {
             serde_json::to_writer_pretty(&File::create("data.json")?, &data)?;
             break;
