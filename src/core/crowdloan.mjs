@@ -5,10 +5,10 @@ import { env, exit } from 'process';
 
 const NETWORK_NAME = 'polkadot';
 const SUBSCAN_API_ENDPOINT = `https://${NETWORK_NAME}.api.subscan.io`;
-const SUBSCAN_API_KEY = env.SUBSCAN_API_KEY;
 const POLKADEX_FUND_ACCOUNT = '13UVJyLnbVp77Z2t6qjFmcyzTXYQJjyb6Hww7ZHPumd81iht';
 
 export async function scrapeCrowdloanData (base_dir) {
+    const SUBSCAN_API_KEY = env.SUBSCAN_API_KEY;
     const CROWDLOAN_DATA_PATH = `${base_dir}/export/crowdloan_data.json`;
     const LAST_BLOCK_NUMBER_PATH = `${base_dir}/export/last_block_number.json`;
     const TRANSFERS_ENDPOINT = '/api/scan/transfers';
